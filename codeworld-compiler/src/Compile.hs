@@ -21,8 +21,11 @@ module Compile ( compileSource ) where
 
 import           Control.Concurrent
 import           Control.Monad
+import           Data.List
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
+import           Data.ByteString.Char8 (pack)
+import           Language.Haskell.HLint3
 import           System.Directory
 import           System.FilePath
 import           System.IO
@@ -39,27 +42,40 @@ compileSource src out err mode = checkDangerousSource src >>= \case
             "Sorry, but your program refers to forbidden language features."
         return False
     False -> withSystemTempDirectory "buildSource" $ \tmpdir -> do
-        copyFile src (tmpdir </> "program.hs")
-        let baseArgs = case mode of
-                "haskell"   -> haskellCompatibleBuildArgs
-                "codeworld" -> standardBuildArgs
-            ghcjsArgs = baseArgs ++ [ "program.hs" ]
-        runCompiler tmpdir userCompileMicros ghcjsArgs >>= \case
-            Nothing -> return False
-            Just output -> do
-                let filteredOutput = case mode of
-                        "haskell"   -> output
-                        "codeworld" -> filterOutput output
-                        _           -> output
-                B.writeFile err filteredOutput
-                let target = tmpdir </> "program.jsexe" </> "all.js"
-                hasTarget <- doesFileExist target
-                when hasTarget $
-                    copyFile target out
-                return hasTarget
+        checkHlintSource src err >>= \case
+            False -> return False
+            True  -> do
+                copyFile src (tmpdir </> "program.hs")
+                let baseArgs = case mode of
+                        "haskell"   -> haskellCompatibleBuildArgs
+                        "codeworld" -> standardBuildArgs
+                    ghcjsArgs = baseArgs ++ [ "program.hs" ]
+                runCompiler tmpdir userCompileMicros ghcjsArgs >>= \case
+                    Nothing -> return False
+                    Just output -> do
+                        let filteredOutput = case mode of
+                                "haskell"   -> output
+                                "codeworld" -> filterOutput output
+                                _           -> output
+                        B.writeFile err filteredOutput
+                        let target = tmpdir </> "program.jsexe" </> "all.js"
+                        hasTarget <- doesFileExist target
+                        when hasTarget $
+                            copyFile target out
+                        return hasTarget
 
 userCompileMicros :: Int
 userCompileMicros = 45 * 1000000
+
+checkHlintSource :: FilePath -> FilePath -> IO Bool
+checkHlintSource src err = do
+    hints <- hlint [src,"--hint=.hlint.yaml","--quiet"]
+    if (pack (show hints)) =~ (pack ".* Error: .*") :: Bool then do 
+        let errorString = (pack ( show hints))
+            filteredOutputHLint = filterOutputHLint errorString
+        B.writeFile err (B.init filteredOutputHLint)
+        return False 
+        else return True
 
 checkDangerousSource :: FilePath -> IO Bool
 checkDangerousSource dir = do

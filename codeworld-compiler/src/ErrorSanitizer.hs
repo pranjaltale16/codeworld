@@ -83,3 +83,14 @@ filterOutput output =
     let out = foldl' applyStage (C.unpack output) filterStages
     in (C.pack out)
     where applyStage s (pattern, sub) = subRegex pattern s sub
+
+filterStagesHLint :: [(Regex, String)]
+filterStagesHLint = [
+        (mkRegex ".*\\.hs:", "program.hs:")
+    ]
+
+filterOutputHLint :: ByteString -> ByteString
+filterOutputHLint output = 
+    let out = foldl' applyStage (C.unpack output) filterStagesHLint
+    in (C.pack out)
+    where applyStage s (pattern, sub) = subRegex pattern s sub
